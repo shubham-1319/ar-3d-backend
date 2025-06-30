@@ -1,31 +1,36 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import FileResponse
-import uuid
-import os
+import shutil
 import subprocess
+import os
 
 app = FastAPI()
 
-@app.post("/process-3d/")
-async def process_3d(file: UploadFile = File(...), filter_type: str = Form(...)):
-    # Save incoming image
-    img_id = uuid.uuid4().hex
-    input_path = f"uploads/{img_id}.jpg"
-    output_path = f"outputs/{img_id}_out.jpg"
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
+UPLOAD_DIR = "uploads"
+OUTPUT_DIR = "outputs"
+MODEL_PATH = "filters/round.glb"  # or any default model
 
-    # Map filter name to .glb model
-    filter_model = f"filters/{filter_type}.glb"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Run Blender in background
-    blender_path = "C:/Program Files/Blender Foundation/Blender/blender.exe"  # adjust for your system
-    blender_script = "blender_scripts/apply_filter.py"
-    subprocess.run([
-        blender_path,
-        "--background",
-        "--python", blender_script,
-        "--", input_path, filter_model, output_path
-    ])
+@app.post("/apply-filter")
+async def apply_filter(file: UploadFile = File(...)):
+    # 1. Save the uploaded image
+    input_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(input_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    return FileResponse(output_path, media_type="image/jpeg")
+    # 2. Define the output path
+    output_path = os.path.join(OUTPUT_DIR, f"filtered_{file.filename}")
+
+    # 3. Call Blender to process the image using the filter
+    try:
+        subprocess.run([
+            "blender", "--background", "--python", "blender_scripts/apply_filter.py",
+            "--", input_path, MODEL_PATH, output_path
+        ], check=True)
+    except subprocess.CalledProcessError as e:
+        return {"error": "Blender processing failed", "details": str(e)}
+
+    # 4. Return the processed image
+    return FileResponse(output_path, media_type="image/jpeg", filename=os.path.basename(output_path))

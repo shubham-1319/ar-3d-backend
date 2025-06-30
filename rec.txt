@@ -69,3 +69,8 @@ bash
 Copy
 Edit
 uvicorn app:app --reload
+
+
+
+
+# type: ignore

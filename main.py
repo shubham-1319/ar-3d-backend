@@ -6,9 +6,10 @@ import os
 
 app = FastAPI()
 
-UPLOAD_DIR = "uploads"
-OUTPUT_DIR = "outputs"
-MODEL_PATH = "filters/round.glb"  # or any default model
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+MODEL_PATH = os.path.join(BASE_DIR, "filters", "round123.glb")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -21,16 +22,20 @@ async def apply_filter(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     # 2. Define the output path
-    output_path = os.path.join(OUTPUT_DIR, f"filtered_{file.filename}")
+    output_filename = f"filtered_{file.filename}"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
 
-    # 3. Call Blender to process the image using the filter
+    # 3. Call Blender with ABSOLUTE paths
     try:
         subprocess.run([
-            "blender", "--background", "--python", "blender_scripts/apply_filter.py",
-            "--", input_path, MODEL_PATH, output_path
+            "blender", "--background", "--python", os.path.join(BASE_DIR, "blender_scripts", "apply_filter.py"),
+            "--", os.path.abspath(input_path), MODEL_PATH, os.path.abspath(output_path)
         ], check=True)
     except subprocess.CalledProcessError as e:
         return {"error": "Blender processing failed", "details": str(e)}
 
     # 4. Return the processed image
-    return FileResponse(output_path, media_type="image/jpeg", filename=os.path.basename(output_path))
+    if not os.path.exists(output_path):
+        return {"error": "Output file was not generated"}
+    
+    return FileResponse(output_path, media_type="image/jpeg", filename=output_filename)

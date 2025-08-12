@@ -3,44 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <title>DeepAR Filter Processor</title>
-    <script src="https://cdn.jsdelivr.net/npm/deepar@latest/deepar.js"></script>
+    <script src="https://cdn.deepar.ai/js/deepar.js"></script>
+    <style>
+      body {
+        margin: 0;
+        background: black;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
   </head>
   <body>
+    <canvas id="deepar-canvas"></canvas>
+
     <script>
-      async function applyDeepARFilter(
-        inputImagePath,
-        outputImagePath,
-        filterName
-      ) {
+      async function applyDeepARFilter(inputPath, outputPath, filterName) {
+        const canvas = document.getElementById("deepar-canvas");
+
         const deepAR = await deepar.initialize({
-          licenseKey: "YOUR_DEEPAR_LICENSE_KEY",
-          canvas: document.createElement("canvas"),
-          effect: `/static/filters/${filterName}.zip`,
-          width: 512,
-          height: 512,
+          licenseKey: "YOUR_DEEPAR_LICENSE_KEY", // <-- Replace with your key
+          canvas: canvas,
+          rootPath: "https://cdn.deepar.ai/js/",
         });
 
-        // Load image into DeepAR
-        await deepAR.loadImage(inputImagePath);
+        // Load effect based on filter name
+        let filterMap = {
+          hair: "https://cdn.deepar.ai/filters/hair.deepar",
+          beard: "https://cdn.deepar.ai/filters/beard.deepar",
+          bald: "https://cdn.deepar.ai/filters/bald.deepar",
+        };
 
-        // Apply effect
-        await deepAR.switchEffect(
+        await deepAR.loadEffect(filterMap[filterName] || filterMap["hair"]);
+
+        // Load the uploaded image
+        const img = new Image();
+        img.src = "file://" + inputPath;
+        await new Promise((res) => {
+          img.onload = res;
+        });
+
+        // Draw image to DeepAR canvas
+        deepAR.switchEffect(
           0,
           "slot",
-          `/static/filters/${filterName}.zip`
+          filterMap[filterName] || filterMap["hair"]
         );
+        deepAR.processImage(img);
 
-        // Render and get image data
-        const dataUrl = deepAR.getScreenshot();
+        // Wait a moment for rendering
+        await new Promise((r) => setTimeout(r, 1000));
 
-        // Save to file (Node FS bridge via Puppeteer)
-        await window.nodeSaveImage(dataUrl, outputImagePath);
+        // Save processed image
+        const dataURL = canvas.toDataURL("image/png");
+        await window.nodeSaveImage(dataURL, outputPath);
 
-        deepAR.destroy();
+        await deepAR.shutdown();
       }
-
-      // Expose to Puppeteer
-      window.applyDeepARFilter = applyDeepARFilter;
     </script>
   </body>
 </html>

@@ -1,41 +1,67 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
-import shutil
-import subprocess
 import os
+import asyncio
+import uuid
+import base64
+from flask import Flask, request, send_file
+from pyppeteer import launch
 
-app = FastAPI()
+app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
-MODEL_PATH = os.path.join(BASE_DIR, "filters", "round123.glb")
+# ================== Function to Save Image ==================
+def save_image(data_url, output_path):
+    header, encoded = data_url.split(",", 1)
+    data = base64.b64decode(encoded)
+    with open(output_path, "wb") as f:
+        f.write(data)
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# ================== DeepAR Processing ==================
+async def run_deepar(input_path, output_path, filter_name):
+    browser = await launch(
+        headless=True,
+        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    )
+    page = await browser.newPage()
 
-@app.post("/apply-filter")
-async def apply_filter(file: UploadFile = File(...)):
-    # 1. Save the uploaded image
-    input_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(input_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    # Expose Python save function to JS
+    await page.exposeFunction("nodeSaveImage", lambda data_url: save_image(data_url, output_path))
 
-    # 2. Define the output path
-    output_filename = f"filtered_{file.filename}"
-    output_path = os.path.join(OUTPUT_DIR, output_filename)
+    # Load DeepAR HTML template
+    await page.goto(f"file://{os.getcwd()}/deepar_filter.html")
 
-    # 3. Call Blender with ABSOLUTE paths
-    try:
-        subprocess.run([
-            "blender", "--background", "--python", os.path.join(BASE_DIR, "blender_scripts", "apply_filter.py"),
-            "--", os.path.abspath(input_path), MODEL_PATH, os.path.abspath(output_path)
-        ], check=True)
-    except subprocess.CalledProcessError as e:
-        return {"error": "Blender processing failed", "details": str(e)}
+    # Run JS function inside HTML to apply filter
+    await page.evaluate(f"""
+        applyDeepARFilter("{input_path}", "{filter_name}")
+            .then(dataUrl => nodeSaveImage(dataUrl));
+    """)
 
-    # 4. Return the processed image
-    if not os.path.exists(output_path):
-        return {"error": "Output file was not generated"}
-    
-    return FileResponse(output_path, media_type="image/jpeg", filename=output_filename)
+    await browser.close()
+
+# ================== API Endpoint ==================
+@app.route("/apply-filter", methods=["POST"])
+def apply_filter():
+    if "image" not in request.files:
+        return {"error": "No image uploaded"}, 400
+
+    image_file = request.files["image"]
+    filter_name = request.form.get("filter", "hair")  # default filter
+
+    # Ensure directories exist
+    os.makedirs("uploads", exist_ok=True)
+    os.makedirs("outputs", exist_ok=True)
+
+    # Save uploaded file
+    filename = f"{uuid.uuid4()}.png"
+    input_path = os.path.abspath(os.path.join("uploads", filename))
+    output_path = os.path.abspath(os.path.join("outputs", filename))
+    image_file.save(input_path)
+
+    # Process with DeepAR
+    asyncio.get_event_loop().run_until_complete(
+        run_deepar(input_path, output_path, filter_name)
+    )
+
+    return send_file(output_path, mimetype="image/png")
+
+# ================== Run Server ==================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))

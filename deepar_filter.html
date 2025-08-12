@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>DeepAR Filter Processor</title>
+    <script src="https://cdn.jsdelivr.net/npm/deepar@latest/deepar.js"></script>
+  </head>
+  <body>
+    <script>
+      async function applyDeepARFilter(
+        inputImagePath,
+        outputImagePath,
+        filterName
+      ) {
+        const deepAR = await deepar.initialize({
+          licenseKey: "YOUR_DEEPAR_LICENSE_KEY",
+          canvas: document.createElement("canvas"),
+          effect: `/static/filters/${filterName}.zip`,
+          width: 512,
+          height: 512,
+        });
+
+        // Load image into DeepAR
+        await deepAR.loadImage(inputImagePath);
+
+        // Apply effect
+        await deepAR.switchEffect(
+          0,
+          "slot",
+          `/static/filters/${filterName}.zip`
+        );
+
+        // Render and get image data
+        const dataUrl = deepAR.getScreenshot();
+
+        // Save to file (Node FS bridge via Puppeteer)
+        await window.nodeSaveImage(dataUrl, outputImagePath);
+
+        deepAR.destroy();
+      }
+
+      // Expose to Puppeteer
+      window.applyDeepARFilter = applyDeepARFilter;
+    </script>
+  </body>
+</html>
